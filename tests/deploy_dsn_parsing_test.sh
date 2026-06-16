@@ -28,4 +28,17 @@ assert_eq "secret" "$(extract_dsn_password "$mysql_dsn")" "mysql password"
 assert_eq "3306" "$(extract_dsn_port "$mysql_dsn")" "mysql port"
 assert_eq "new-api" "$(extract_dsn_dbname "$mysql_dsn")" "mysql database"
 
+DB_ENGINE="mysql"
+DB_DNS="127.0.0.1"
+DB_PORT="3306"
+HOST_DB_PORT=""
+HOST_DB_PROXY_PORT=""
+
+configure_host_loopback_proxy
+
+assert_eq "host.docker.internal" "$DB_DNS" "loopback proxy host"
+assert_eq "13306" "$DB_PORT" "loopback proxy port"
+assert_eq "3306" "$HOST_DB_PORT" "loopback source port"
+assert_eq "13306" "$HOST_DB_PROXY_PORT" "loopback published proxy port"
+
 echo "deploy DSN parsing tests passed"

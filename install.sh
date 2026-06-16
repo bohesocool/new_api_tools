@@ -41,6 +41,7 @@ setup_compose_files() {
   local env_file="${project_dir}/.env"
   local base="${project_dir}/docker-compose.yml"
   local host_overlay="${project_dir}/docker-compose.host.yml"
+  local host_loopback_overlay="${project_dir}/docker-compose.host-loopback.yml"
 
   unset COMPOSE_FILE
 
@@ -58,6 +59,11 @@ setup_compose_files() {
   # NEWAPI_NETWORK= （空值）→ deploy.sh 在 host 模式下生成的标记
   if [[ -z "$nw" && -f "$host_overlay" ]]; then
     export COMPOSE_FILE="${base}:${host_overlay}"
+    local proxy_port_line
+    proxy_port_line=$(grep -E '^HOST_DB_PROXY_PORT=.' "$env_file" 2>/dev/null | head -n1 || true)
+    if [[ -n "$proxy_port_line" && -f "$host_loopback_overlay" ]]; then
+      export COMPOSE_FILE="${COMPOSE_FILE}:${host_loopback_overlay}"
+    fi
   fi
 }
 
@@ -70,7 +76,7 @@ cleanup_project_docker_resources() {
   log_info "清理 newapi-tools 残留 Docker 资源..."
 
   docker ps -a --format '{{.Names}}' \
-    | grep -E '^(newapi-tools|newapi-tools-redis|newapi-tools-backend|newapi-tools-frontend)$' \
+    | grep -E '^(newapi-tools|newapi-tools-redis|newapi-tools-db-proxy|newapi-tools-backend|newapi-tools-frontend)$' \
     | xargs -r docker rm -f 2>/dev/null || true
 
   docker images --format '{{.Repository}}:{{.Tag}}' \
@@ -210,8 +216,8 @@ show_initial_env_detection() {
     if [[ "$network_mode" == "host" ]]; then
       echo -e "  ${YELLOW}!${NC} 网络模式: ${YELLOW}Host 模式${NC}"
       echo -e "    ${YELLOW}→ NewAPI 与宿主机共享网络栈${NC}"
-      echo -e "    ${YELLOW}→ newapi-tools 将通过 host.docker.internal 访问数据库${NC}"
-      echo -e "    ${YELLOW}→ 启动时会附加 docker-compose.host.yml overlay${NC}"
+      echo -e "    ${YELLOW}→ newapi-tools 将按数据库地址自动选择直连或本机 TCP 代理${NC}"
+      echo -e "    ${YELLOW}→ 启动时会附加 host 模式 overlay${NC}"
     elif [[ "$networks" == "bridge" ]]; then
       echo -e "  ${YELLOW}!${NC} 网络模式: ${YELLOW}Bridge 模式${NC}"
       echo -e "    ${YELLOW}→ NewAPI 使用默认 bridge 网络${NC}"
@@ -872,7 +878,7 @@ do_purge_interactive() {
   echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
   echo ""
   echo -e "${YELLOW}将永久删除以下 newapi-tools 自身的数据：${NC}"
-  echo "  • 容器: newapi-tools / newapi-tools-redis"
+  echo "  • 容器: newapi-tools / newapi-tools-redis / newapi-tools-db-proxy"
   echo "  • 镜像: ghcr.io/james-6-23/new_api_tools:*"
   echo "  • Redis 缓存卷 (仪表盘 / 模型状态 / 等缓存)"
   echo "  • Docker 网络: newapi-tools-network (若存在)"
@@ -1006,7 +1012,7 @@ perform_cleanup() {
 
   # 强制删除可能残留的容器
   local containers
-  containers=$(docker ps -a --format '{{.Names}}' | grep -E '^(newapi-tools-backend|newapi-tools-frontend)$' 2>/dev/null || true)
+  containers=$(docker ps -a --format '{{.Names}}' | grep -E '^(newapi-tools-db-proxy|newapi-tools-backend|newapi-tools-frontend)$' 2>/dev/null || true)
   if [[ -n "$containers" ]]; then
     echo "$containers" | xargs -r docker rm -f 2>/dev/null || true
     log_success "已删除相关容器"

@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 COMPOSE_HOST_FILE="${SCRIPT_DIR}/docker-compose.host.yml"
+COMPOSE_HOST_LOOPBACK_FILE="${SCRIPT_DIR}/docker-compose.host-loopback.yml"
 
 # 由 detect_environment() 设置：host 模式下需要追加 overlay compose 文件
 COMPOSE_FILES=("-f" "$COMPOSE_FILE")
@@ -149,6 +150,19 @@ extract_dsn_dbname() {
   if [[ -n "$dbname" ]]; then echo "$dbname"; return 0; fi
   dbname="$(echo "$dsn" | sed -nE 's#^.*@tcp\([^)]*\)/([^?]+).*#\1#p')"
   echo "$dbname"
+}
+
+configure_host_loopback_proxy() {
+  HOST_DB_PORT="${HOST_DB_PORT:-$DB_PORT}"
+  if [[ -z "${HOST_DB_PROXY_PORT:-}" ]]; then
+    if [[ "$DB_ENGINE" == "postgres" ]]; then
+      HOST_DB_PROXY_PORT="15432"
+    else
+      HOST_DB_PROXY_PORT="13306"
+    fi
+  fi
+  DB_DNS="host.docker.internal"
+  DB_PORT="$HOST_DB_PROXY_PORT"
 }
 
 detect_newapi_container() {
@@ -323,6 +337,9 @@ detect_environment() {
 
   DB_ENGINE="$(extract_dsn_engine "$detected_dsn" || true)"
   DB_DNS="$(extract_dsn_host "$detected_dsn" || true)"
+  USE_HOST_LOOPBACK_PROXY=false
+  HOST_DB_PORT="${HOST_DB_PORT:-}"
+  HOST_DB_PROXY_PORT="${HOST_DB_PROXY_PORT:-}"
 
   # ===== Host 模式：完全从 DSN 解析凭证，跳过数据库容器探测 =====
   if [[ "$USE_HOST_MODE" == "true" ]]; then
@@ -331,13 +348,13 @@ detect_environment() {
 
     # ===== 决定 newapi-tools 怎么连到这个数据库 =====
     # 三种情形：
-    #  (a) DSN host 是 127.0.0.1/localhost → 数据库真在宿主机回环上，用 host.docker.internal。
+    #  (a) DSN host 是 127.0.0.1/localhost → 数据库真在宿主机回环上，用本机 TCP 代理转发。
     #  (b) DSN host 是某条 bridge 网络上某容器的 IP（如 1Panel 托管的 PG）→ 把 newapi-tools
     #      挂进那条网络，并把 host 改写成容器名（同网络 Docker DNS 可解析，且重启不变 IP）。
     #  (c) 其它（外部 DB、真实 LAN IP、域名）→ 原样保留，靠 extra_hosts / 宿主路由可达。
     if [[ "$DB_DNS" == "127.0.0.1" || "$DB_DNS" == "localhost" || "$DB_DNS" == "::1" ]]; then
-      DB_DNS="host.docker.internal"
-      log_info "数据库地址改写: 127.0.0.1 → host.docker.internal（数据库在宿主机回环上）"
+      USE_HOST_LOOPBACK_PROXY=true
+      log_info "数据库地址为宿主机回环地址，将通过本机 TCP 代理访问"
     elif is_ipv4_literal "$DB_DNS"; then
       local _hit _hit_net _hit_name
       _hit="$(find_container_by_network_ip "$DB_DNS")"
@@ -372,11 +389,21 @@ detect_environment() {
       DB_NAME="${DB_NAME:-new-api}"
     fi
 
+    if [[ "$USE_HOST_LOOPBACK_PROXY" == "true" ]]; then
+      configure_host_loopback_proxy
+      log_info "数据库地址改写: 127.0.0.1:${HOST_DB_PORT} → ${DB_DNS}:${DB_PORT}（本机 TCP 代理）"
+    fi
+
     if [[ "$USE_HOST_MODE" == "true" ]]; then
       # 情形 (a)/(c)：数据库走宿主机（host.docker.internal）或外部地址，
       # newapi-tools 无需任何 external 网络 → 加载 host overlay 去掉 newapi-network 依赖。
       if [[ -f "$COMPOSE_HOST_FILE" ]]; then
         COMPOSE_FILES=("-f" "$COMPOSE_FILE" "-f" "$COMPOSE_HOST_FILE")
+        if [[ "$USE_HOST_LOOPBACK_PROXY" == "true" && -f "$COMPOSE_HOST_LOOPBACK_FILE" ]]; then
+          COMPOSE_FILES+=("-f" "$COMPOSE_HOST_LOOPBACK_FILE")
+        elif [[ "$USE_HOST_LOOPBACK_PROXY" == "true" ]]; then
+          log_warn "未找到 $COMPOSE_HOST_LOOPBACK_FILE，宿主机回环数据库可能无法连接"
+        fi
       else
         log_warn "未找到 $COMPOSE_HOST_FILE，host 模式可能启动失败"
       fi
@@ -605,6 +632,8 @@ DB_PORT=${DB_PORT}
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
+HOST_DB_PORT=${HOST_DB_PORT}
+HOST_DB_PROXY_PORT=${HOST_DB_PROXY_PORT}
 
 # 认证配置
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
@@ -705,6 +734,7 @@ start_services() {
     log_warn "发现已存在的服务容器，正在停止..."
     $DOCKER_COMPOSE "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
+  docker rm -f newapi-tools-db-proxy 2>/dev/null || true
 
   # 拉取最新镜像
   log_info "拉取最新镜像..."
@@ -790,6 +820,7 @@ uninstall() {
 
   if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v 2>/dev/null || true
+    docker rm -f newapi-tools-db-proxy 2>/dev/null || true
     log_success "容器已停止并移除"
   fi
 
