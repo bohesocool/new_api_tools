@@ -62,7 +62,7 @@
 如果 NewAPI 已部署在 Linux 服务器上，可以使用一键脚本自动检测环境并部署：
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main/install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/bohesocool/new_api_tools/main/install.sh)
 ```
 
 脚本会自动定位 NewAPI 安装目录、读取数据库配置、生成必要密钥、设置管理员密码、配置 Docker 网络并启动服务。部署完成后访问：
@@ -76,7 +76,7 @@ http://your-server-ip:1145
 适用于熟悉 Docker 的用户或非标准环境：
 
 ```bash
-git clone https://github.com/james-6-23/new_api_tools.git
+git clone https://github.com/bohesocool/new_api_tools.git
 cd new_api_tools
 cp .env.example .env
 vim .env

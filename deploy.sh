@@ -85,9 +85,10 @@ first_csv() {
 extract_dsn_engine() {
   local dsn="${1:-}"
   if [[ -z "$dsn" ]]; then return 0; fi
-  if [[ "$dsn" =~ ^postgres(ql)?:// ]]; then
+  local lower="${dsn,,}"
+  if [[ "$lower" =~ ^postgres(ql)?:// || "$lower" =~ (^|[[:space:]])host= ]]; then
     echo "postgres"
-  elif [[ "$dsn" =~ ^mysql:// ]]; then
+  elif [[ "$lower" =~ ^mysql:// || "$lower" =~ @tcp\( ]]; then
     echo "mysql"
   fi
 }
@@ -99,6 +100,10 @@ extract_dsn_host() {
   host="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@/]*@([^:/]+).*#\1#p')"
   if [[ -n "$host" ]]; then echo "$host"; return 0; fi
   host="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:/]+).*#\1#p')"
+  if [[ -n "$host" ]]; then echo "$host"; return 0; fi
+  host="$(echo "$dsn" | sed -nE 's#^.*@tcp\(([^:)]+)(:[0-9]+)?\)/.*#\1#p')"
+  if [[ -n "$host" ]]; then echo "$host"; return 0; fi
+  host="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])host=([^[:space:]]+).*#\2#p')"
   echo "$host"
 }
 
@@ -106,28 +111,44 @@ extract_dsn_host() {
 extract_dsn_user() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:@/]+)(:[^@/]*)?@.*#\1#p'
+  local user
+  user="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:@/]+)(:[^@/]*)?@.*#\1#p')"
+  if [[ -n "$user" ]]; then echo "$user"; return 0; fi
+  user="$(echo "$dsn" | sed -nE 's#^([^:@/]+)(:[^@/]*)?@tcp\(.*#\1#p')"
+  echo "$user"
 }
 
 # 从 DSN URL 解析密码
 extract_dsn_password() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^:@/]+:([^@]*)@.*#\1#p'
+  local password
+  password="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^:@/]+:([^@]*)@.*#\1#p')"
+  if [[ -n "$password" ]]; then echo "$password"; return 0; fi
+  password="$(echo "$dsn" | sed -nE 's#^[^:@/]+:([^@]*)@tcp\(.*#\1#p')"
+  echo "$password"
 }
 
 # 从 DSN URL 解析端口
 extract_dsn_port() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^:/]+:([0-9]+).*#\1#p'
+  local port
+  port="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^:/]+:([0-9]+).*#\1#p')"
+  if [[ -n "$port" ]]; then echo "$port"; return 0; fi
+  port="$(echo "$dsn" | sed -nE 's#^.*@tcp\([^:)]*:([0-9]+)\)/.*#\1#p')"
+  echo "$port"
 }
 
 # 从 DSN URL 解析数据库名
 extract_dsn_dbname() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^/]+/([^?]+).*#\1#p'
+  local dbname
+  dbname="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^/]+/([^?]+).*#\1#p')"
+  if [[ -n "$dbname" ]]; then echo "$dbname"; return 0; fi
+  dbname="$(echo "$dsn" | sed -nE 's#^.*@tcp\([^)]*\)/([^?]+).*#\1#p')"
+  echo "$dbname"
 }
 
 detect_newapi_container() {

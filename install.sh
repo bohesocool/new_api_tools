@@ -5,7 +5,7 @@ set -euo pipefail
 # NewAPI Middleware Tool - 快速安装脚本
 #
 # 用法:
-#   bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main/install.sh)
+#   bash <(curl -sSL https://raw.githubusercontent.com/bohesocool/new_api_tools/main/install.sh)
 #
 # 功能:
 #   1. 自动检测 NewAPI 安装目录
@@ -27,7 +27,7 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 die() { log_error "$*"; exit 1; }
 
-REPO_URL="https://github.com/james-6-23/new_api_tools.git"
+REPO_URL="https://github.com/bohesocool/new_api_tools.git"
 PROJECT_NAME="new_api_tools"
 REINSTALL=false
 
@@ -226,9 +226,10 @@ show_initial_env_detection() {
     sql_dsn=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$newapi_container" 2>/dev/null | awk -F= '$1=="SQL_DSN"{print $2; exit}')
 
     if [[ -n "$sql_dsn" ]]; then
-      if [[ "$sql_dsn" =~ ^postgres ]]; then
+      local sql_dsn_lower="${sql_dsn,,}"
+      if [[ "$sql_dsn_lower" =~ ^postgres || "$sql_dsn_lower" =~ (^|[[:space:]])host= ]]; then
         echo -e "  ${GREEN}✓${NC} 数据库类型: ${GREEN}PostgreSQL${NC}"
-      elif [[ "$sql_dsn" =~ ^mysql ]]; then
+      elif [[ "$sql_dsn_lower" =~ ^mysql:// || "$sql_dsn_lower" =~ @tcp\( ]]; then
         echo -e "  ${GREEN}✓${NC} 数据库类型: ${GREEN}MySQL${NC}"
       fi
     fi
@@ -1368,7 +1369,7 @@ NewAPI Middleware Tool - 安装管理脚本
   PROJECT_DIR      指定项目目录（默认: 自动检测）
   NEWAPI_CONTAINER 指定 NewAPI 容器名（默认: 自动检测）
 
-更多信息: https://github.com/james-6-23/new_api_tools
+更多信息: https://github.com/bohesocool/new_api_tools
 EOF
 }
 
